@@ -1,0 +1,122 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: event_rsvp_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/event_rsvp
+      - SYNC_DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/event_rsvp
+      - UPLOAD_DIR=uploads
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost:8000"]
+      - SECRET_KEY=your-super-secret-key-change-in-production
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - event_rsvp_network
+
+  db:
+    image: postgres:15-alpine
+    container_name: event_rsvp_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=event_rsvp
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d event_rsvp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - event_rsvp_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: event_rsvp_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - event_rsvp_network
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: event_rsvp_worker
+    command: ["celery", "-A", "application.workers.celery_app", "worker", "--loglevel=info"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/event_rsvp
+      - SYNC_DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/event_rsvp
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - SECRET_KEY=your-super-secret-key-change-in-production
+    volumes:
+      - logs_data:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - event_rsvp_network
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: event_rsvp_migrate
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/event_rsvp
+      - SYNC_DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/event_rsvp
+      - SECRET_KEY=your-super-secret-key-change-in-production
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - event_rsvp_network
+
+volumes:
+  postgres_data:
+  uploads_data:
+  logs_data:
+  redis_data:
+
+networks:
+  event_rsvp_network:
+    driver: bridge
