@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_dir: str = "logs"
 
-    secret_key: str = "your-super-secret-key-change-in-production"
+    secret_key: str = "one-random-key" #should have used cryptography to generate it but i wanted to keep it simple instead
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
